@@ -234,40 +234,76 @@ aftershock hours. The drone fades to silence when playback is paused, when the
 tab is hidden, and at the end of the day. It is deliberately mixed below the
 event voices: silence should never feel empty, but should still feel quiet.
 
-## 6. Polyphony and cue scheduling
+## 6. Dense-day arrangement
 
-- **Cap: 16 voices.** If a new event arrives while all 16 are sounding, the
-  oldest voice is stolen. Stealing fades a dedicated, automation-free gain gate
-  over 25 ms and then stops its oscillators. The envelope node itself may still
-  be running a value curve, so the gate is what makes stealing reliable.
+The map, Heard log, and complete day index always contain every normalized event.
+The performance score is allowed to group events so a busy aftershock sequence
+stays legible and does not spend the entire 16-slot voice budget on near-simultaneous
+duplicates.
+
+`buildPhrases()` scans a chronologically sorted day and, from each start time,
+collects up to four events inside a five-minute window:
+
+- three or four events become a **cluster phrase**;
+- one or two remain individual phrases, with the scan advancing to the next
+  event so a later dense run can still form a chord;
+- the strongest event by magnitude becomes the phrase's **lead**;
+- the phrase starts at its earliest member's offset.
+
+When a phrase is triggered, every member keeps its own pitch, stereo pan, and
+timbre. The lead controls the shared amplitude envelope, filter, reverb/delay
+sends, and optional sub layer, so the strongest quake remains the foreground
+signal inside the chord. `AudioEngine.triggerCluster()` reserves **one**
+polyphony slot for the whole group while scheduling a carrier and overtone per
+member. This is what prevents a dense day from turning into voice-steal churn.
+
+On the 2010-02-27 Chile aftershock day, 365 events became **206 phrases**,
+including **68 clusters**. The largest cluster has four members. All 365 events
+still appear on the map and in the index.
+
+The grouping is deterministic and greedy. It does not optimize a global chord
+progression: the goal is to keep simultaneous events consonant and audible, not
+to invent a different composition for the same day. Cluster membership is part
+of the reproducible score.
+
+## 7. Polyphony and cue scheduling
+
+- **Cap: 16 voice slots.** A phrase reserves one slot, whether it is an
+  individual quake or a three- or four-note cluster. If a new phrase arrives
+  while all 16 slots are sounding, the oldest slot is stolen. Stealing fades a
+  dedicated, automation-free gain gate over 25 ms and then stops its
+  oscillators. The envelope node itself may still be running a value curve, so
+  the gate is what makes stealing reliable.
 - Each voice is removed from the active count when its final oscillator ends.
-- Cues are batched per animation frame (up to 24 events) and scheduled into
-  AudioContext time with a 30 ms stagger per voice. A quiet day is sparse; a
-  deep aftershock sequence uses the cap rather than creating unbounded nodes.
+- Visual cues are batched per animation frame (up to 24 events), while arrange
+  phrases are triggered through the score cursor. A quiet day is sparse; a deep
+  aftershock sequence uses chords before it reaches the voice cap.
 - The playhead clock is a `requestAnimationFrame` clock. The day is 24 hours of
   composition time in 90 seconds of real time at 1×, so 1 ms of wall-clock
   playback advances 960 ms of the day. The 0.5×/1×/2×/4× speed buttons change only that
   clock; the audio mapping is unaffected. Playing in a background tab is paused
   because rAF and visual cue scheduling cannot continue there.
 
-## 7. Tuning report
+## 8. Tuning report
 
 ### Days used
 
 - **Quiet:** 2026-11-06 UTC — 32 M2.5+ events, largest M6.1, 32 events spread
   over the day; max 3 simultaneous voices in the offline pass.
 - **Busy:** 2010-02-27 UTC — Chile M8.8 aftershock day: 365 M2.5+ events, largest
-  M8.8, up to 32 events in one UTC hour, one completely empty hour,
-  84 voices triggering the sub layer.
+  M8.8, up to 32 events in one UTC hour, one completely empty hour. The current
+  arrangement schedules those 365 events as 206 phrases, including 68 clusters;
+  the largest chord has four notes.
 
 The busy day is not just “more events”: it has a quiet first six hours followed
 by a sustained aftershock field, which is exactly the kind of dynamic shape the
 drone density mapping is meant to expose.
 
-### Initial 44.1 kHz offline pass
+### Pre-arrangement baseline (44.1 kHz)
 
-Both days were rendered through the real engine into a 92-second stereo
-`OfflineAudioContext`:
+Before the phrase arrangement and retune, both days were rendered through the
+real engine into a 92-second stereo `OfflineAudioContext`. This is the baseline
+that motivated the group-voice work:
 
 | | Quiet day | Busy day |
 | :--- | ---: | ---: |
@@ -305,24 +341,29 @@ and event determinism are identical. This was a level and headroom tune.
 
 ### Final verification (44.1 kHz offline pass)
 
-Both days were rendered again at the production sample rate after the retune.
-An interim 22.05 kHz pass was used only to iterate faster; the numbers below are
-the final 44.1 kHz comparison.
+Both days were rendered again at the production sample rate after the retune and
+the dense-day arrangement. An interim 22.05 kHz pass was used only to iterate
+faster; the numbers below are the final 44.1 kHz comparison.
 
 | | Quiet day | Busy day |
 | :--- | ---: | ---: |
-| Peak | −8.13 dBFS | −5.41 dBFS |
-| RMS | −27.47 dB | −18.58 dB |
+| Events | 32 | 365 |
+| Phrases | 32 | 206 |
+| Clusters | 0 | 68 |
+| Peak | −8.13 dBFS | −5.86 dBFS |
+| RMS | −27.47 dB | −19.55 dB |
 | Clipped samples | 0 | 0 |
-| Max simultaneous voices | 3 | 16 |
-| Voices stolen | 0 | 95 |
+| Max simultaneous voice slots | 3 | 16 |
+| Voice slots stolen | 0 | 0 |
 
-The RMS contrast is about 8.9 dB. The busy day's dense aftershock field is
+The RMS contrast is about 7.9 dB. The busy day's dense aftershock field is
 therefore substantially louder than the quiet day without approaching full
-scale: at least 5.4 dB of peak headroom remains, and the compressor still moves
+scale: at least 5.8 dB of peak headroom remains, and the compressor still moves
 rather than flattening everything. No hard clipping occurs in either pass. The
-quiet day's sparse events remain peaks against the drone rather than a constant
-wash, which is the contrast the piece needs.
+busy day fills all 16 slots at its peak but, because dense groups reserve one
+slot per chord, it no longer steals any voices. The quiet day's sparse events
+remain peaks against the drone rather than a constant wash, which is the
+contrast the piece needs.
 
 A human ear is the final judge of “pleasant”; these measurements verify the
 structural targets (consonance, headroom, contrast, deterministic mapping) but
@@ -331,7 +372,7 @@ kept intentionally soft and low-mid weighted; if you want a brighter mix,
 raise the master gain and the reverb return slightly, then re-check the busy day
 for headroom.
 
-## 8. Limits and assumptions
+## 9. Limits and assumptions
 
 - This is an artistic mapping, not a seismological one. Magnitude is not mapped
   to physical rupture energy; depth is not wave propagation; latitude is not a
@@ -340,26 +381,25 @@ for headroom.
 - The app uses the USGS “preferred” origin and magnitude at M2.5 and above. The
   catalogue is revised over time, and cached copies can differ from the current
   live values.
-- At most 16 voices sound at once. In an extreme swarm some events are stolen or
-  (during a single animation frame) batched; the log and map still record what
-  fired.
+- At most 16 voice slots sound at once. A three- or four-note chord consumes
+  one slot but several carriers, so the slot count is not the same as the
+  number of simultaneous oscillators. In an extreme swarm some phrases can
+  still be stolen; the log and map still record what fired.
 - The audio graph is mono-compatible but intended for stereo: pan is an
   important part of the composition.
 - The app is not an emergency or scientific tool.
 
-## 9. Post-V1 extension points (not built)
+## 10. Post-V1 extension points (not built)
 
 The current code keeps the data, pure mapping, audio graph, map, timeline, and
 UI in separate modules so these can be added without restructuring:
 
 1. **Two-date comparison.** Use a second event set and a second engine graph or
    panned layer; `mapEvent` and `hourlyDensity` already accept plain arrays.
-2. **WAV export and share hashes.** Reuse the `OfflineAudioContext` path used by
-   the dev analysis helper, then encode/download the buffer. A
-   `#date=YYYY-MM-DD` hash can be read before the initial `loadDay`.
-3. **Weather layers.** Add a layer module that returns timed cues and a
+2. **Weather layers.** Add a layer module that returns timed cues and a
    continuous bed, then feed it into the same scheduled-cue and drone buses.
    A shared `layer` interface would expose `prepareDay`, `densityAt`, and
    `scheduleCues`.
 
-None of these features are implemented in this version.
+Neither of these features is implemented in this version. Share hashes and WAV
+rendering, previously listed here, are now part of the app.

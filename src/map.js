@@ -13,6 +13,9 @@ const TILE_URL =
   'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const ATTRIBUTION =
   'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a> — Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors, and the GIS user community';
+const FALLBACK_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const FALLBACK_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 
 function markerColor(mag) {
   const t = clamp((mag - 2.5) / 4.5, 0, 1);
@@ -34,13 +37,17 @@ function markerRadius(mag) {
 }
 
 export class QuakeMap {
-  constructor(container, { onSelect, onBackground } = {}) {
+  constructor(container, { onSelect, onBackground, onStatus } = {}) {
     this.container = container;
     this.onSelect = onSelect;
     this.onBackground = onBackground;
+    this.onStatus = onStatus;
     this.markers = new Map();
     this.markerStyles = new Map();
     this.pulseTimers = new Map();
+    this.basemapState = 'primary';
+    this.primaryTileErrors = 0;
+    this.fallbackTileErrors = 0;
 
     this.map = L.map(container, {
       zoomControl: false,
@@ -55,11 +62,14 @@ export class QuakeMap {
       renderer: L.canvas({ padding: 0.45 }),
     });
 
-    this.tiles = L.tileLayer(TILE_URL, {
+    this.primaryTiles = L.tileLayer(TILE_URL, {
       attribution: ATTRIBUTION,
       maxZoom: 19,
       detectRetina: true,
-    }).addTo(this.map);
+    });
+    this.primaryTiles.on('tileerror', () => this._onPrimaryTileError());
+    this.primaryTiles.addTo(this.map);
+    this.tiles = this.primaryTiles;
 
     L.control
       .zoom({
@@ -87,6 +97,37 @@ export class QuakeMap {
     };
     requestAnimationFrame(fitWorld);
     window.setTimeout(fitWorld, 120);
+  }
+
+  _onPrimaryTileError() {
+    if (this.basemapState !== 'primary') return;
+    this.primaryTileErrors += 1;
+    if (this.primaryTileErrors >= 3) this._switchToFallback();
+  }
+
+  _switchToFallback() {
+    if (this.basemapState !== 'primary') return;
+    this.basemapState = 'fallback';
+    this.primaryTiles.off('tileerror');
+    this.map.removeLayer(this.primaryTiles);
+    this.container.classList.add('map--fallback');
+    this.fallbackTiles = L.tileLayer(FALLBACK_TILE_URL, {
+      attribution: FALLBACK_ATTRIBUTION,
+      maxZoom: 19,
+    });
+    this.fallbackTiles.on('tileerror', () => this._onFallbackTileError());
+    this.fallbackTiles.addTo(this.map);
+    this.tiles = this.fallbackTiles;
+    this.onStatus?.('fallback');
+  }
+
+  _onFallbackTileError() {
+    if (this.basemapState !== 'fallback') return;
+    this.fallbackTileErrors += 1;
+    if (this.fallbackTileErrors >= 4) {
+      this.basemapState = 'unavailable';
+      this.onStatus?.('unavailable');
+    }
   }
 
   setEvents(events) {
@@ -120,7 +161,7 @@ export class QuakeMap {
       marker.on('mouseout', () => {
         marker.setStyle(style);
       });
-      marker.on('click', () => this.onSelect?.(event));
+      marker.on('click', () => this.onSelect?.(event, this.container));
       marker.bindTooltip(() => this._tooltip(event), {
         direction: 'top',
         offset: [0, -2],

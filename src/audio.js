@@ -85,13 +85,17 @@ export class AudioEngine {
     this.active = false;
     this.density = 0.12;
     this.started = false;
-    this.stats = { triggered: 0, stolen: 0, maxVoices: 0 };
+    this.volume = 1;
+    this.muted = false;
+    this.stats = { triggered: 0, stolen: 0, maxVoices: 0, clusters: 0 };
 
     this._buildGraph();
     this._buildDrone();
   }
 
   async start() {
+    const firstStart = !this.started;
+
     if (
       this.ctx.state === 'suspended' &&
       typeof this.ctx.resume === 'function'
@@ -99,6 +103,43 @@ export class AudioEngine {
       await this.ctx.resume();
     }
     this.started = true;
+
+    // A short opening swell makes the instrument feel intentional rather than
+    // starting on a hard transient. The user volume is applied afterwards so
+    // the fade never ignores a saved level.
+    if (firstStart) {
+      const now = this.ctx.currentTime;
+      const target = this._outputTarget();
+      this.output.gain.cancelScheduledValues(now);
+      this.output.gain.setValueAtTime(0.0001, now);
+      if (target > 0.0001) {
+        this.output.gain.exponentialRampToValueAtTime(target, now + 1.35);
+      }
+    }
+  }
+
+  _outputTarget() {
+    return this.muted ? 0.0001 : Math.max(0.0001, this.volume);
+  }
+
+  setVolume(value, { immediate = false } = {}) {
+    const next = Number(value);
+    if (!Number.isFinite(next)) return;
+    this.volume = clamp(next, 0, 1);
+    if (!this.output) return;
+
+    const now = this.ctx.currentTime;
+    this.output.gain.cancelScheduledValues(now);
+    if (immediate) {
+      this.output.gain.setValueAtTime(this._outputTarget(), now);
+    } else {
+      this.output.gain.setTargetAtTime(this._outputTarget(), now, 0.035);
+    }
+  }
+
+  setMuted(muted) {
+    this.muted = Boolean(muted);
+    this.setVolume(this.volume);
   }
 
   _buildGraph() {
@@ -123,10 +164,16 @@ export class AudioEngine {
     this.master = ctx.createGain();
     this.master.gain.value = 0.68;
 
+    // The calibrated mix stays fixed; this final stage is the listener's
+    // volume / mute, so tuning measurements remain comparable.
+    this.output = ctx.createGain();
+    this.output.gain.value = 1;
+
     this.input.connect(this.compressor);
     this.compressor.connect(this.clipper);
     this.clipper.connect(this.master);
-    this.master.connect(this.destination);
+    this.master.connect(this.output);
+    this.output.connect(this.destination);
 
     // Shared generated-impulse reverb ---------------------------------
     this.reverb = ctx.createConvolver();
@@ -234,15 +281,18 @@ export class AudioEngine {
     return 0.028 + 0.07 * clamp(this.density, 0, 1);
   }
 
-  setActive(active, when = this.ctx.currentTime) {
+  setActive(active, when = this.ctx.currentTime, fadeSeconds = null) {
     this.active = Boolean(active);
     const time = Math.max(when, this.ctx.currentTime);
     const target = this.active ? this._droneLevel() : 0.0001;
+    const fade = Number.isFinite(fadeSeconds)
+      ? Math.max(0.1, fadeSeconds)
+      : 0.55;
     this.droneGain.gain.cancelScheduledValues(time);
     this.droneGain.gain.setTargetAtTime(
       target,
       time,
-      this.active ? 1.1 : 0.55,
+      this.active ? 1.1 : fade,
     );
 
     if (this.active) {
@@ -309,7 +359,7 @@ export class AudioEngine {
    * @param {ReturnType<import('./mapping.js').mapEvent>} params
    * @param {number} when AudioContext time
    */
-  trigger(params, when = this.ctx.currentTime) {
+  trigger(params, when = this.ctx.currentTime, { focus = false } = {}) {
     const ctx = this.ctx;
     const start = Math.max(when, ctx.currentTime);
     const peak = Math.max(0.0002, params.gain);
@@ -353,12 +403,16 @@ export class AudioEngine {
     gate.connect(this.input);
 
     const reverbSend = ctx.createGain();
-    reverbSend.gain.value = params.reverbSend;
+    reverbSend.gain.value = clamp(
+      params.reverbSend * (focus ? 1.35 : 1),
+      0.1,
+      0.86,
+    );
     gate.connect(reverbSend);
     reverbSend.connect(this.reverb);
 
     const delaySend = ctx.createGain();
-    delaySend.gain.value = params.delaySend;
+    delaySend.gain.value = clamp(params.delaySend * (focus ? 1.2 : 1), 0.04, 0.42);
     gate.connect(delaySend);
     delaySend.connect(this.delay);
 
@@ -464,6 +518,176 @@ export class AudioEngine {
     this.voices.push(voice);
     this.stats.triggered += 1;
     this.stats.maxVoices = Math.max(this.stats.maxVoices, this.voices.length);
+  }
+
+  /**
+   * Schedule a dense cluster as one voice with several pitched carriers. The
+   * cluster reserves one polyphony slot, keeps the strongest note foreground,
+   * and gives every note its own stereo position. This is what keeps busy days
+   * from collapsing into voice stealing.
+   */
+  triggerCluster(paramsList, when = this.ctx.currentTime) {
+    const notes = (paramsList || []).filter(Boolean).slice(0, 4);
+    if (!notes.length) return;
+    if (notes.length === 1) {
+      this.trigger(notes[0], when);
+      return;
+    }
+
+    const ctx = this.ctx;
+    const start = Math.max(when, ctx.currentTime);
+    const lead = notes.reduce(
+      (strongest, note) =>
+        note.magNorm > strongest.magNorm ? note : strongest,
+      notes[0],
+    );
+    const attack = Math.max(0.025, lead.attack + 0.04);
+    const decay = Math.max(...notes.map((note) => note.decay)) * 1.05 + 0.12;
+    const peak = lead.gain * 1.04;
+    const end = start + attack + decay + 0.1;
+    const subEnd = lead.sub
+      ? start + attack + lead.sub.decay + 0.15
+      : end;
+    const stopAt = Math.max(end, subEnd);
+
+    this._reserveVoice(start);
+
+    const gate = ctx.createGain();
+    gate.gain.value = 1;
+    gate.connect(this.input);
+
+    const amplitude = ctx.createGain();
+    amplitude.gain.setValueAtTime(0.0001, start);
+    amplitude.gain.linearRampToValueAtTime(peak, start + attack);
+    const curveLength = 64;
+    const curve = new Float32Array(curveLength);
+    for (let i = 0; i < curveLength; i += 1) {
+      const t = i / (curveLength - 1);
+      curve[i] = Math.max(
+        0.0001,
+        peak * (1 - t) ** Math.max(1.25, lead.decayShape),
+      );
+    }
+    amplitude.gain.setValueCurveAtTime(curve, start + attack + 0.002, decay);
+    amplitude.connect(gate);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = lead.q;
+    const openAt = start + attack + 0.03;
+    filter.frequency.setValueAtTime(
+      Math.min(6000, lead.cutoff * 0.55),
+      start,
+    );
+    filter.frequency.linearRampToValueAtTime(lead.cutoff, openAt);
+    filter.frequency.exponentialRampToValueAtTime(
+      Math.max(220, lead.cutoff * 0.36),
+      start + attack + decay * 0.9,
+    );
+    filter.connect(amplitude);
+
+    const weights = notes.map((_, index) => (index === 0 ? 1.35 : 0.55));
+    const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+    const oscillators = [];
+
+    notes.forEach((note, index) => {
+      const noteBus = ctx.createGain();
+      noteBus.gain.value = weights[index] / weightTotal;
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = clamp(note.pan, -1, 1);
+
+      const carrier = ctx.createOscillator();
+      carrier.type = 'sine';
+      carrier.frequency.value = note.frequency;
+      carrier.detune.value = note.detuneCents;
+      carrier.connect(noteBus);
+
+      const overtone = ctx.createOscillator();
+      overtone.type = 'triangle';
+      overtone.frequency.value = note.frequency;
+      overtone.detune.value = -note.detuneCents;
+      const overtoneGain = ctx.createGain();
+      overtoneGain.gain.value = note.triangleMix;
+      overtone.connect(overtoneGain);
+      overtoneGain.connect(noteBus);
+
+      noteBus.connect(panner);
+      panner.connect(filter);
+      oscillators.push(carrier, overtone);
+    });
+
+    if (lead.sub) {
+      const sub = ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.value = lead.sub.frequency;
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0.0001, start);
+      subGain.gain.linearRampToValueAtTime(
+        Math.max(0.001, lead.sub.gain),
+        start + attack + 0.22,
+      );
+      subGain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        start + attack + lead.sub.decay,
+      );
+      const subFilter = ctx.createBiquadFilter();
+      subFilter.type = 'lowpass';
+      subFilter.frequency.value = 240;
+      subFilter.Q.value = 0.4;
+      const subPanner = ctx.createStereoPanner();
+      subPanner.pan.value = clamp(lead.pan, -1, 1);
+      sub.connect(subFilter);
+      subFilter.connect(subGain);
+      subGain.connect(subPanner);
+      subPanner.connect(gate);
+      oscillators.push(sub);
+    }
+
+    const reverbSend = ctx.createGain();
+    reverbSend.gain.value = clamp(lead.reverbSend * 1.12, 0.1, 0.8);
+    gate.connect(reverbSend);
+    reverbSend.connect(this.reverb);
+
+    const delaySend = ctx.createGain();
+    delaySend.gain.value = clamp(lead.delaySend * 1.1, 0.04, 0.4);
+    gate.connect(delaySend);
+    delaySend.connect(this.delay);
+
+    for (const oscillator of oscillators) {
+      oscillator.start(start);
+      oscillator.stop(stopAt);
+    }
+
+    const cleanupOscillator = oscillators[oscillators.length - 1];
+    cleanupOscillator.onended = () => {
+      try {
+        gate.disconnect();
+        reverbSend.disconnect();
+        delaySend.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    };
+
+    this.voices.push({
+      start,
+      end: stopAt + 0.05,
+      gate,
+      oscillators,
+    });
+    this.stats.triggered += notes.length;
+    this.stats.clusters += 1;
+    this.stats.maxVoices = Math.max(this.stats.maxVoices, this.voices.length);
+  }
+
+  triggerPhrase(paramsList, when = this.ctx.currentTime, options = {}) {
+    const notes = (paramsList || []).filter(Boolean);
+    if (!notes.length) return;
+    if (notes.length === 1) {
+      this.trigger(notes[0], when, options);
+      return;
+    }
+    this.triggerCluster(notes, when);
   }
 
   /** Convenience for a batch of simultaneous events. */

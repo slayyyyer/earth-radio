@@ -6,9 +6,13 @@
 
 Earth Radio turns a single UTC day of real USGS earthquake data into a
 90-second ambient composition. Each quake gets a pitch, a stereo position, a
-brightness, and an envelope derived from its real coordinates and magnitude.
-A dark world map pulses when that sound fires, and every marker or log entry can
-be inspected and replayed.
+brightness, and an envelope derived from its real coordinates and magnitude. A
+dark world map pulses when that sound fires, and every marker, log row, or event
+in the complete day index can be inspected, framed, and replayed.
+
+Shareable links restore a day, playhead, or event without autoplaying audio. The
+complete day can be rendered locally to a WAV file, and an installable service
+worker keeps the interface available offline after the first visit.
 
 Every sound is synthesized in the browser with the Web Audio API. There are no
 audio files, samples, API keys, or servers.
@@ -16,12 +20,16 @@ audio files, samples, API keys, or servers.
 - **Stack:** Vite + vanilla JavaScript, Leaflet, Web Audio API
 - **Hosting:** static files on GitHub Pages, deployed from `main` by Actions
 - **Data:** USGS FDSN event query API, cached per day in `localStorage`
-- **Sound design:** deterministic D-minor-pentatonic voices, a density-driven
-  drone, generated convolution reverb, feedback delay, 16-voice cap
+- **Arrangement:** deterministic phrase score; dense 5-minute groups become
+  3–4-note chords while every event stays visible on the map and in the index
+- **Sound design:** D-minor-pentatonic voices, a density-driven drone, generated
+  convolution reverb, feedback delay, a 16-slot voice cap
+- **Offline:** installable manifest and service worker (production builds only)
 
 ## Run locally
 
-Requires Node.js 20.19+ (or 22.12+). Vite 7 is the only build dependency.
+Requires Node.js 20.19+ (or 22.12+). Vite and Leaflet are the only runtime/build
+dependencies.
 
 ```bash
 npm install
@@ -36,56 +44,119 @@ npm run build
 npm run preview
 ```
 
-There is no environment file and no API key. The basemap uses Esri's public
-Dark Gray Canvas raster tiles, which also require no map key. The app needs
-network access for the USGS query, Esri/OpenStreetMap map tiles, and Google
-Fonts. Previously
-visited days keep working from the local cache even if USGS is unreachable; the
-basemap tiles and web fonts are third-party requests and will not be cached by
-the app.
+Run the dependency-free unit tests with:
 
-## How to use it
+```bash
+npm test
+```
 
-1. Pick a **UTC day**. The default is yesterday. Future dates are blocked.
-2. Press **Start listening**. Browsers require this gesture before Web Audio can
-   start. Headphones are recommended for the stereo field and low sub layer.
-3. Press play/pause, choose 0.5×, 1×, 2×, or 4× speed, or drag the histogram to
-   seek. At 1× the full 24 hours take 90 seconds.
-4. Click a pulsing marker or a row in the event log to open its place,
-   magnitude, depth, UTC time, coordinates, and a link to the USGS event page.
-   That action also replays the event's sound.
+There is no environment file and no API key. The basemap uses Esri's public Dark
+Gray Canvas raster tiles, with keyless OpenStreetMap as the fallback. The
+typefaces are self-hosted WOFF2 files, not Google Fonts requests. The app needs
+network access for the USGS query and map tiles; previously visited days keep
+working from the local cache, and the production app shell is cached by the
+service worker.
 
-Keyboard controls:
+## What is here
 
-- **Space** — play/pause when the page (not a form control) has focus
+### First minute
+
+- **How to listen** opens a compact field guide for time, longitude, depth, and
+  magnitude.
+- A **now sounding** strip names the quake or chord as it fires.
+- **Next quake** and **Strongest** jump to the next event or the day's peak while
+  keeping the map and list in sync.
+- The audio status explains the extra tap browsers require before Web Audio can
+  start. The map, timeline, and index remain fully usable without sound.
+
+### Listening controls
+
+- Start listening opens the audio context on a user gesture and fades the first
+  sound in.
+- Volume and mute are available during playback and persist in `localStorage`.
+  The default volume is 80%.
+- Clicking any marker or list row pauses the timeline, frames the quake, and
+  auditions it with the focused reverb treatment.
+- Pause fades the drone out; the end of the day gets a longer outro fade.
+
+### Date navigation and sharing
+
+- **← / →** step one UTC day; **Today** returns to the current, still-in-progress
+  UTC day; **Refresh** forces a fresh network request.
+- Today always attempts the live feed first, retaining the cached copy as an
+  offline fallback. Other days load from cache when available.
+- **Copy link** copies a hash URL for the current day and playhead. The event
+  card can copy an event-specific link.
+- A hash can contain `date`, `t` (seconds from UTC midnight), and `event`:
+
+  ```text
+  #date=2026-11-06&t=53280&event=us7000abcd
+  ```
+
+  Event links always frame that event and do not autoplay. A mismatched `t` is
+  ignored once the event is resolved.
+
+### Accessible day index
+
+The side panel has two views:
+
+- **Heard** is the chronological log of events that have sounded, capped at 60.
+- **All quakes** is the complete day index. It can be filtered by minimum
+  magnitude and by a six-hour UTC window.
+
+Every row is a native button with a descriptive accessible name. Selecting a row
+frames and replays the quake, opens its detail card, and returns focus to the row
+when the card closes. The index remains scrollable and keyboard-operable when it
+contains hundreds of events.
+
+### Dense days
+
+The playback score is built from the normalized event list, not from the map or
+visual cue stream. In a five-minute window:
+
+- three or four quakes become one chord-like phrase;
+- the strongest member is the foreground lead;
+- every member keeps its own pitch, pan, timbre, and seeded variation;
+- the chord consumes one polyphony slot, avoiding a wall of voice steals.
+
+All events still appear on the map, in the Heard log, and in the full index. On
+the 2010-02-27 Chile aftershock day, 365 events became 206 phrases, including 68
+chords of three or four notes.
+
+### WAV export and PWA
+
+- **WAV** renders the day through the same audio graph in an
+  `OfflineAudioContext` and downloads a 16-bit stereo WAV. The render includes a
+  short tail after the 90-second composition and is done entirely locally.
+- Production builds register `sw.js`, cache the app shell, and expose
+  `manifest.webmanifest` with 192px and 512px icons. USGS calls and third-party
+  map tiles are deliberately not intercepted; day data has its own cache, and a
+  stale basemap is worse than the visible fallback state.
+
+## Keyboard controls
+
+- **Space** — play/pause when focus is not inside a form control or button
 - **← / →** on the timeline — seek 15 minutes; **Shift** makes it one hour
 - **Home / End** — jump to 00:00 / 24:00
 - **Escape** — close the event detail card
-
-The log lists events as they are heard. It is capped at 60 entries and is
-cleared when you change days.
-
-The HUD reports whether the current day came from the live feed or from the
-local cache. If a refresh fails and a cached copy exists, the app falls back to
-it and labels it **Offline cache**. Empty days get a quiet message and still
-allow the drone bed to play.
+- Every control, filter, index row, and link is reachable by Tab and Enter.
 
 ## Sound and determinism
 
-The short version: longitude sets stereo pan, depth sets a quantized pitch in D
-minor pentatonic (shallow high, deep low), magnitude sets gain and envelope
-length plus filter openness, and latitude opens or closes the timbre. Larger
-quakes also receive a key-locked sub layer. All per-event variation is seeded by
-the USGS event ID, so revisiting a day produces the same notes and envelopes.
+Longitude sets stereo pan. Depth sets a quantized pitch in D minor pentatonic
+(shallow high, deep low). Magnitude sets gain and envelope length plus filter
+openness, and latitude opens or closes the timbre. Larger quakes also receive a
+key-locked sub layer. All per-event variation is seeded by the USGS event ID, so
+revisiting a day produces the same notes and envelopes.
 
-The long version, including formulas, tables, voice architecture, polyphony,
-master limiting, and tuning measurements, is in [MAPPING.md](MAPPING.md).
+The full formulas, voice architecture, cluster rules, polyphony, tuning
+measurements, and limits are in [MAPPING.md](MAPPING.md).
 
 ## Data handling
 
 `src/data.js` requests:
 
-```
+```text
 https://earthquake.usgs.gov/fdsnws/event/1/query
   ?format=geojson
   &starttime=YYYY-MM-DD
@@ -94,8 +165,8 @@ https://earthquake.usgs.gov/fdsnws/event/1/query
   &orderby=time-asc
 ```
 
-The API treats a date-only `endtime` as midnight at the *start* of that date,
-so the app requests the next UTC date explicitly and filters events to the
+The API treats a date-only `endtime` as midnight at the start of that date, so
+the app requests the next UTC date explicitly and filters events to the
 24-hour window locally. Non-earthquake event types are discarded. Features are
 normalized to a compact shape:
 
@@ -109,97 +180,126 @@ days. A fetch failure returns the cached copy if one exists; a cache miss
 produces a friendly error and a retry button. An empty FeatureCollection is a
 valid, cacheable result.
 
-There is no backend and no analytics. The only data stored is the earthquake
-cache in your browser; the only network requests are USGS, map tiles, and fonts.
+There is no backend and no analytics. The only data stored locally is the
+earthquake cache, audio preferences, and the service-worker app shell. Network
+requests go to USGS, Esri, and OpenStreetMap.
+
+## Reliability
+
+- Esri Dark Gray Canvas is the primary basemap. After three primary tile errors,
+  the app switches to keyless OpenStreetMap with a dark tile treatment and shows
+  a **Basemap fallback** chip.
+- After four fallback tile errors, the map reports that tiles are unavailable
+  while markers, the timeline, and details continue to work.
+- Failed USGS requests preserve a cached day when possible and otherwise show a
+  retry action.
+- The map, timeline, and index are independent of Web Audio, so they still work
+  if audio cannot start.
 
 ## Architecture
 
-```
+```text
 index.html
 src/
-  main.js       orchestration, timeline clock, date loading, playback
-  data.js       USGS fetch, normalization, localStorage cache, date helpers
-  mapping.js    pure event -> sound parameters, seeded RNG, hourly density
-  audio.js      Web Audio graph, voices, drone, reverb, delay, limiter
-  map.js        Leaflet dark map, markers, tooltips, pulse rings
-  timeline.js   canvas density histogram and accessible scrubber
-  ui.js         date picker, transport, audio status, detail card, log
-  styles.css    candy-cyberpunk layout and motion
+  main.js        orchestration, clock, date loading, sharing, export, PWA setup
+  data.js        USGS fetch, normalization, localStorage cache, date helpers
+  mapping.js     pure event -> sound parameters, seeded RNG, density
+  arrangement.js deterministic phrase and chord builder
+  audio.js       Web Audio graph, voices, drone, reverb, delay, limiter
+  map.js         Leaflet dark map, fallback tiles, markers, pulses
+  timeline.js    canvas density histogram and accessible scrubber
+  ui.js          all DOM controls, detail card, log, index, preferences
+  share.js       hash parsing and canonical share URLs
+  wav.js         16-bit PCM WAV encoder
+  styles.css     candy-cyberpunk layout and motion
+  fonts.css      self-hosted font faces
+public/
+  manifest.webmanifest, sw.js, icons, og.png, fonts licenses
+test/            Node test runner suites for pure modules
 ```
 
 Data flows one way: `loadDay()` → normalized events → map markers, histogram,
-and hourly density. During playback, a requestAnimationFrame clock advances the
-playhead and queues the events it crosses through `mapping.js` into the audio
-engine. The map pulses and event log are fed from the same cue batch.
+and hourly density. `buildPhrases()` deterministically folds dense groups into
+the performance score. During playback, a requestAnimationFrame clock advances
+the playhead and fires both visual cues and audio phrases. The same score feeds
+the now-sounding strip, log, and WAV renderer.
 
-The modules are deliberately isolated for the post-V1 ideas:
-
-- **Compare two days:** load a second event set, mirror the map layer, and give
-  the second engine graph a different pan or layer. `hourlyDensity` and
-  `mapEvent` are already pure and can be called per day.
-- **Export a day / share a URL:** `AudioEngine` accepts any `AudioContext`,
-  including `OfflineAudioContext`. The dev-only analysis helper in `main.js`
-  already renders a full day through the real graph; a production WAV renderer
-  can reuse that path. Dates are strings in one place, ready for a URL hash.
-- **Weather layers:** add a layer module that produces timed cues and a
-  continuous bed, then schedule it alongside the earthquake layer. The audio
-  engine's sends, master bus, drone, and voice cap can be shared.
-
-## Deploy to GitHub Pages
+## Deployment to GitHub Pages
 
 The live site is deployed from this repository at
-<https://slayyyyer.github.io/earth-radio/>. The included workflow at
-`.github/workflows/deploy.yml` runs on every push to `main`.
+<https://slayyyyer.github.io/earth-radio/>. The workflow at
+`.github/workflows/deploy.yml` runs on every push to `main`, installs with
+`npm ci`, runs `npm test`, builds with `npm run build`, and publishes `dist/`.
 
 To set up a fork:
 
 1. Push the project to a GitHub repository with `main` as the default branch.
 2. In **Settings → Pages → Build and deployment**, choose **GitHub Actions**.
-3. Push to `main`, or run the workflow manually. It installs with `npm ci`,
-   builds with `npm run build`, and publishes `dist/`.
+3. Push to `main`, or run the workflow manually.
 
 `vite.config.js` uses `base: './'`, so the same build works at
 `https://<user>.github.io/<repo>/` and at a custom domain. There are no
-server-side routes.
+server-side routes. The service worker registration is relative to the deployed
+page and its scope is the app directory.
 
-To publish manually instead, run `npm run build` and serve/upload `dist/` with
-any static host. Do not upload `node_modules` or the source tree.
+To publish manually, run `npm run build` and serve/upload `dist/` with any
+static host. Do not upload `node_modules` or the source tree.
 
 ## Verification notes
 
-The app was run in a browser against real USGS data. The busy-day and quiet-day
-sound checks were rendered through the production engine with
-`OfflineAudioContext`; see the tuning section of [MAPPING.md](MAPPING.md) for
-the measured peaks, RMS levels, voice counts, and what changed. The UI was
-verified at desktop and 390 px mobile widths for the stacked layout and
-horizontal overflow, and the cache, stale-cache fallback, empty-day, error,
-visibility-pause, end-of-day, and replay paths were exercised.
+The 21 unit tests cover the phrase/cluster determinism, share-hash parsing and
+round trips, WAV headers and PCM encoding, date helpers, USGS query construction,
+and event normalization.
 
-A browser-level audio check is not a substitute for human listening: use
-headphones and adjust the day/speed to taste.
+The app was exercised in a browser against live and cached USGS days:
+
+- the 2026-11-06 quiet day (32 events) loaded with live fonts and no horizontal
+  overflow at 390px;
+- a deep link restored the correct event on initial load, focused its close
+  button, retained the canonical event hash, and left audio off;
+- the full index rendered 365 events and the M5+/06–12 filter narrowed it to 68;
+- the 2010-02-27 dense day produced 68 three- or four-note clusters, and a
+  chord fired through the running audio engine;
+- a 92-second offline render produced stereo audio at 44.1 kHz with no clipped
+  samples; the dense-day pass peaked at −5.86 dBFS with zero voices stolen;
+- the production service worker activated, controlled the page, cached the app
+  shell, and served a valid manifest with both icons;
+- the Esri-to-OpenStreetMap fallback was observed in both dev and production.
+
+The automated browser tab reports `document.hidden`, which makes Chromium
+suspend `requestAnimationFrame`. The playback tick and cue path were therefore
+driven through the development clock API against the running audio engine; a
+visible-browser listening pass with headphones is still recommended for final
+mix judgments. A browser-level audio check is not a substitute for human
+listening.
 
 ## Accessibility and motion
 
 - The timeline is a keyboard-operable ARIA slider with a text value.
-- Buttons have labels; the detail card announces updates.
-- Log rows are buttons with descriptive accessible names.
+- Buttons have labels; the detail card announces updates and restores focus to
+  the originating log or index row.
+- Log and index rows are native buttons with descriptive names.
+- The volume slider has a visible value and an ARIA value text.
 - `prefers-reduced-motion` removes decorative loops and shortens pulse rings.
-- The interface remains usable without sound; the map, log, and details still
-  work if Web Audio is unavailable.
+- The interface remains usable without sound.
 
-The map markers are canvas-based for density, so individual markers are not
-focusable. Events you have heard are available as keyboard-accessible rows in
-the event log, which also replays their sound.
+Map markers are canvas-based for density, so individual markers are not
+focusable. Every event is available as a keyboard-accessible row in the full day
+index.
 
 ## Credits
 
 Earthquake data: [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/).
-Basemap: [Esri World Dark Gray Canvas](https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer)
-using data from Esri, HERE, Garmin,
-[OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, and the
-GIS user community.
+
+Basemap: [Esri World Dark Gray Canvas](https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer),
+using data from Esri, HERE, Garmin, OpenStreetMap contributors, and the GIS user
+community. Fallback tiles: [OpenStreetMap](https://www.openstreetmap.org/copyright).
+
 Map library: [Leaflet](https://leafletjs.com/).
-Typefaces: Unbounded and Space Mono via Google Fonts.
+
+Typefaces: [Unbounded](https://fonts.google.com/specimen/Unbounded) and
+[Space Mono](https://fonts.google.com/specimen/Space+Mono), self-hosted under the
+SIL Open Font License. License texts are in `public/fonts/`.
 
 This is an artistic instrument, not a seismological simulation or an emergency
 service. In an emergency, follow local authorities.

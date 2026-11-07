@@ -288,7 +288,10 @@ export async function loadDay(dateString, { force = false, signal } = {}) {
   }
 
   const cached = readCache(dateString);
-  if (cached && !force) {
+  // Today is still in progress. Always try the live feed first, while keeping
+  // yesterday's cached copy as the offline fallback.
+  const isToday = dateString === todayUtcDate();
+  if (cached && !force && !isToday) {
     return {
       events: cached.events,
       cached: true,

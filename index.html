@@ -5,16 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Earth Radio turns one UTC day of real USGS earthquakes into a deterministic ambient composition, with a map showing what made each sound."
+      content="Earth Radio turns one UTC day of real USGS earthquakes into a deterministic ambient composition, with a map, timeline, and per-quake detail."
     />
     <meta name="theme-color" content="#07030d" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Unbounded:wght@400;600;800&display=swap"
-      rel="stylesheet"
+    <meta name="application-name" content="Earth Radio" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Earth Radio — one day of the planet, in sound" />
+    <meta
+      property="og:description"
+      content="One UTC day of USGS earthquakes, played as a 90-second ambient instrument. Listen, explore the map, and follow the signal."
     />
+    <meta property="og:url" content="https://slayyyyer.github.io/earth-radio/" />
+    <meta property="og:image" content="https://slayyyyer.github.io/earth-radio/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Earth Radio: one day of the planet, in sound." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Earth Radio — one day of the planet, in sound" />
+    <meta
+      name="twitter:description"
+      content="One UTC day of USGS earthquakes, played as a 90-second ambient instrument."
+    />
+    <meta name="twitter:image" content="https://slayyyyer.github.io/earth-radio/og.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <title>Earth Radio — one day of the planet, in sound</title>
   </head>
   <body>
@@ -35,8 +51,14 @@
       <div class="dateline">
         <label class="eyebrow" for="date-input">UTC day</label>
         <div class="dateline__row">
+          <button class="date-step" id="prev-day" type="button" aria-label="Previous UTC day">←</button>
           <input id="date-input" type="date" required />
+          <button class="date-step" id="next-day" type="button" aria-label="Next UTC day">→</button>
+        </div>
+        <div class="dateline__subrow">
           <span class="dateline__meta" id="date-meta"></span>
+          <button class="text-button" id="today-button" type="button">Today</button>
+          <button class="text-button" id="refresh-day" type="button">Refresh</button>
         </div>
       </div>
     </header>
@@ -60,6 +82,32 @@
       </button>
     </div>
 
+    <details class="how-to" id="how-to">
+      <summary>
+        <span class="eyebrow">How to listen</span>
+        <span class="how-to__hint">A field guide to the sonification</span>
+        <span class="how-to__plus" aria-hidden="true">+</span>
+      </summary>
+      <div class="how-to__grid">
+        <div>
+          <span class="how-to__axis">Time</span>
+          <p>At 1×, the playhead crosses one UTC day in 90 seconds.</p>
+        </div>
+        <div>
+          <span class="how-to__axis">Longitude</span>
+          <p>West is left in the stereo field; east is right.</p>
+        </div>
+        <div>
+          <span class="how-to__axis">Depth</span>
+          <p>Shallow quakes ring high; deep ones settle low in D minor pentatonic.</p>
+        </div>
+        <div>
+          <span class="how-to__axis">Magnitude</span>
+          <p>Bigger quakes are louder, longer, brighter, and gain a sub layer.</p>
+        </div>
+      </div>
+    </details>
+
     <main class="app">
       <section class="stage" aria-label="World map of the day's earthquakes">
         <div id="map"></div>
@@ -72,6 +120,7 @@
           </span>
           <span class="hud-chip hud-chip--quiet" id="map-count">— events</span>
           <span class="hud-chip hud-chip--source" id="data-source">Live feed</span>
+          <span class="hud-chip hud-chip--map" id="map-status" hidden></span>
         </div>
 
         <div class="map-state" id="map-state" hidden>
@@ -130,6 +179,9 @@
               </svg>
               Replay sound
             </button>
+            <button class="detail__share" id="detail-share" type="button">
+              Copy link
+            </button>
             <a
               class="detail__link"
               id="detail-link"
@@ -160,6 +212,12 @@
                 <strong id="stat-max">—</strong>
               </div>
             </div>
+          </div>
+
+          <div class="now-sounding" id="now-sounding" hidden aria-live="polite" aria-atomic="true">
+            <span class="now-sounding__pulse" aria-hidden="true"></span>
+            <span class="eyebrow" id="now-kicker">Now sounding</span>
+            <strong id="now-sounding-label"></strong>
           </div>
 
           <div class="timeline" id="timeline-wrap">
@@ -216,6 +274,44 @@
             </div>
           </div>
 
+          <div class="transport__tools">
+            <div class="jump-actions" role="group" aria-label="Jump through the day">
+              <button class="tool-button" id="next-quake" type="button">Next quake</button>
+              <button class="tool-button" id="strongest-quake" type="button">
+                Strongest <span id="strongest-label">—</span>
+              </button>
+            </div>
+            <div class="audio-tools">
+              <button
+                class="tool-button tool-button--mute"
+                id="mute-toggle"
+                type="button"
+                aria-pressed="false"
+                aria-label="Mute audio"
+              >
+                Mute
+              </button>
+              <label class="volume-control" for="volume-input">
+                <span class="volume-control__label">Vol</span>
+                <input
+                  id="volume-input"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="80"
+                  aria-label="Volume"
+                />
+                <output id="volume-value" for="volume-input">80%</output>
+              </label>
+            </div>
+            <div class="share-actions">
+              <button class="tool-button" id="share-button" type="button">Copy link</button>
+              <button class="tool-button" id="export-button" type="button">WAV</button>
+            </div>
+          </div>
+          <p class="tool-status" id="tool-status" role="status" aria-live="polite"></p>
+
           <div class="transport__foot">
             <span>Quake density · 10 min bins</span>
             <span id="duration-label">24 h → 90 s</span>
@@ -225,14 +321,60 @@
         <section class="panel log-panel" aria-label="Event log">
           <header class="log-head">
             <div>
-              <span class="eyebrow">Signal log</span>
-              <h2>Heard on this day</h2>
+              <span class="eyebrow" id="event-view-eyebrow">Signal log</span>
+              <h2 id="event-view-title">Heard on this day</h2>
             </div>
             <span class="count" id="log-count">0</span>
           </header>
+          <div class="log-switch" role="group" aria-label="Event list view">
+            <button
+              class="is-active"
+              id="view-heard"
+              type="button"
+              aria-pressed="true"
+              aria-controls="log"
+            >
+              Heard
+            </button>
+            <button
+              id="view-all"
+              type="button"
+              aria-pressed="false"
+              aria-controls="index-view"
+            >
+              All quakes
+            </button>
+          </div>
           <div class="log" id="log">
             <p class="log__empty" id="log-empty">
               Press play. Each quake will log itself here as it sounds.
+            </p>
+          </div>
+          <div class="index-view" id="index-view" hidden>
+            <div class="index-filters">
+              <label class="index-filter" for="index-min-mag">
+                <span>Magnitude</span>
+                <select id="index-min-mag">
+                  <option value="2.5">M2.5+</option>
+                  <option value="4">M4.0+</option>
+                  <option value="5">M5.0+</option>
+                  <option value="6">M6.0+</option>
+                </select>
+              </label>
+              <label class="index-filter" for="index-window">
+                <span>UTC window</span>
+                <select id="index-window">
+                  <option value="all">All day</option>
+                  <option value="0">00–06</option>
+                  <option value="6">06–12</option>
+                  <option value="12">12–18</option>
+                  <option value="18">18–24</option>
+                </select>
+              </label>
+            </div>
+            <div class="index-list" id="day-index"></div>
+            <p class="log__empty" id="index-empty" hidden>
+              No quakes match those filters.
             </p>
           </div>
         </section>
