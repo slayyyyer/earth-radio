@@ -2,6 +2,8 @@
 
 **One day of the planet, in sound.**
 
+[Live site](https://slayyyyer.github.io/earth-radio/) · [Source on GitHub](https://github.com/slayyyyer/earth-radio)
+
 Earth Radio turns a single UTC day of real USGS earthquake data into a
 90-second ambient composition. Each quake gets a pitch, a stereo position, a
 brightness, and an envelope derived from its real coordinates and magnitude.
@@ -12,7 +14,7 @@ Every sound is synthesized in the browser with the Web Audio API. There are no
 audio files, samples, API keys, or servers.
 
 - **Stack:** Vite + vanilla JavaScript, Leaflet, Web Audio API
-- **Hosting:** static files, ready for GitHub Pages
+- **Hosting:** static files on GitHub Pages, deployed from `main` by Actions
 - **Data:** USGS FDSN event query API, cached per day in `localStorage`
 - **Sound design:** deterministic D-minor-pentatonic voices, a density-driven
   drone, generated convolution reverb, feedback delay, 16-voice cap
@@ -145,7 +147,11 @@ The modules are deliberately isolated for the post-V1 ideas:
 
 ## Deploy to GitHub Pages
 
-A workflow is included at `.github/workflows/deploy.yml`.
+The live site is deployed from this repository at
+<https://slayyyyer.github.io/earth-radio/>. The included workflow at
+`.github/workflows/deploy.yml` runs on every push to `main`.
+
+To set up a fork:
 
 1. Push the project to a GitHub repository with `main` as the default branch.
 2. In **Settings → Pages → Build and deployment**, choose **GitHub Actions**.
