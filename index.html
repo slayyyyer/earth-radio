@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Earth Radio turns one UTC day of real USGS earthquakes into a deterministic ambient composition, with a map showing what made each sound."
+    />
+    <meta name="theme-color" content="#07030d" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Unbounded:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+    <title>Earth Radio — one day of the planet, in sound</title>
+  </head>
+  <body>
+    <div class="texture" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="brand__copy">
+          <h1 class="brand__title" aria-label="Earth Radio">EARTH<span aria-hidden="true">RADIO</span></h1>
+          <p class="brand__tagline">One day of the planet, in sound.</p>
+        </div>
+      </div>
+
+      <div class="dateline">
+        <label class="eyebrow" for="date-input">UTC day</label>
+        <div class="dateline__row">
+          <input id="date-input" type="date" required />
+          <span class="dateline__meta" id="date-meta"></span>
+        </div>
+      </div>
+    </header>
+
+    <div class="listen-bar" id="listen-bar">
+      <div class="listen-bar__status">
+        <span class="signal-dot" id="audio-dot"></span>
+        <div class="listen-bar__copy">
+          <span class="eyebrow" id="audio-kicker">Headphones recommended</span>
+          <p id="audio-status">
+            This is a browser instrument. It needs one tap before it can make
+            sound.
+          </p>
+        </div>
+      </div>
+      <button class="start-button" id="start-listening" type="button">
+        <span class="start-button__label">Start listening</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M7 4.5 15 10l-8 5.5z" fill="currentColor" />
+        </svg>
+      </button>
+    </div>
+
+    <main class="app">
+      <section class="stage" aria-label="World map of the day's earthquakes">
+        <div id="map"></div>
+        <div class="stage__frame" aria-hidden="true"></div>
+
+        <div class="stage__hud">
+          <span class="hud-chip">
+            <span class="signal-dot signal-dot--tiny"></span>
+            USGS · M2.5+
+          </span>
+          <span class="hud-chip hud-chip--quiet" id="map-count">— events</span>
+          <span class="hud-chip hud-chip--source" id="data-source">Live feed</span>
+        </div>
+
+        <div class="map-state" id="map-state" hidden>
+          <div class="seismo" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <p id="map-state-text">Tuning into the USGS feed…</p>
+          <button class="ghost-button" id="map-retry" type="button" hidden>
+            Try again
+          </button>
+        </div>
+
+        <aside class="detail" id="detail" hidden aria-labelledby="detail-place">
+          <button
+            class="detail__close"
+            id="detail-close"
+            type="button"
+            aria-label="Close event details"
+          >
+            ×
+          </button>
+          <p class="detail__eyebrow">
+            <span class="detail__ping" aria-hidden="true"></span>
+            Selected event
+          </p>
+          <div class="detail__head">
+            <span class="detail__mag" id="detail-mag">M—</span>
+            <h2 id="detail-place">—</h2>
+          </div>
+          <dl class="detail__grid">
+            <div>
+              <dt>Depth</dt>
+              <dd id="detail-depth">—</dd>
+            </div>
+            <div>
+              <dt>UTC</dt>
+              <dd id="detail-time">—</dd>
+            </div>
+            <div>
+              <dt>Coordinates</dt>
+              <dd id="detail-coords">—</dd>
+            </div>
+            <div>
+              <dt>Event ID</dt>
+              <dd id="detail-id">—</dd>
+            </div>
+          </dl>
+          <div class="detail__actions">
+            <button class="replay-button" id="detail-replay" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 3.5a6.5 6.5 0 1 1-6.2 8.5h2.2A4.5 4.5 0 1 0 10 5.5v2L6.5 4.5 10 1.5z"
+                  fill="currentColor"
+                />
+                <path d="M8.5 7.5 13 10l-4.5 2.5z" fill="currentColor" />
+              </svg>
+              Replay sound
+            </button>
+            <a
+              class="detail__link"
+              id="detail-link"
+              href="https://earthquake.usgs.gov/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              USGS event ↗
+            </a>
+          </div>
+        </aside>
+      </section>
+
+      <aside class="control-deck">
+        <section class="panel transport" aria-label="Playback controls">
+          <div class="transport__top">
+            <div class="readout">
+              <span class="eyebrow">Playhead · UTC</span>
+              <output class="clock" id="clock">00:00:00</output>
+            </div>
+            <div class="day-stats">
+              <div class="stat">
+                <span>Events</span>
+                <strong id="stat-count">—</strong>
+              </div>
+              <div class="stat">
+                <span>Peak</span>
+                <strong id="stat-max">—</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline" id="timeline-wrap">
+            <canvas
+              id="timeline"
+              role="slider"
+              tabindex="0"
+              aria-label="Seek through the UTC day"
+              aria-valuemin="0"
+              aria-valuemax="86400000"
+              aria-valuenow="0"
+              aria-valuetext="00:00 UTC"
+            ></canvas>
+            <div class="timeline__tooltip" id="timeline-tooltip" hidden></div>
+          </div>
+          <div class="axis" aria-hidden="true">
+            <span>00:00</span>
+            <span>06:00</span>
+            <span>12:00</span>
+            <span>18:00</span>
+            <span>24:00</span>
+          </div>
+
+          <div class="controls">
+            <button
+              class="play"
+              id="play-toggle"
+              type="button"
+              aria-label="Play the day"
+              disabled
+            >
+              <svg class="play__icon play__icon--play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.5 18.5 12 8 18.5z" fill="currentColor" />
+              </svg>
+              <svg
+                class="play__icon play__icon--pause"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" />
+                <rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" />
+              </svg>
+            </button>
+            <div class="timecode">
+              <span id="timecode-now">00:00:00</span>
+              <span class="timecode__hint">/ 24h</span>
+            </div>
+            <div class="speed-picker" role="group" aria-label="Playback speed">
+              <span class="speed-picker__label">Speed</span>
+              <button type="button" data-speed="0.5">0.5×</button>
+              <button type="button" data-speed="1" class="is-active">1×</button>
+              <button type="button" data-speed="2">2×</button>
+              <button type="button" data-speed="4">4×</button>
+            </div>
+          </div>
+
+          <div class="transport__foot">
+            <span>Quake density · 10 min bins</span>
+            <span id="duration-label">24 h → 90 s</span>
+          </div>
+        </section>
+
+        <section class="panel log-panel" aria-label="Event log">
+          <header class="log-head">
+            <div>
+              <span class="eyebrow">Signal log</span>
+              <h2>Heard on this day</h2>
+            </div>
+            <span class="count" id="log-count">0</span>
+          </header>
+          <div class="log" id="log">
+            <p class="log__empty" id="log-empty">
+              Press play. Each quake will log itself here as it sounds.
+            </p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>
+        Data:
+        <a
+          href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php"
+          target="_blank"
+          rel="noopener noreferrer"
+          >USGS Earthquake Hazards Program</a
+        >
+        · M2.5+ · no backend, no samples
+      </span>
+      <span class="footer__note"
+        >An instrument, not an emergency service. In an emergency, follow local
+        authorities.</span
+      >
+    </footer>
+
+    <noscript>
+      <p class="noscript">
+        Earth Radio needs JavaScript and the Web Audio API to turn earthquakes
+        into sound.
+      </p>
+    </noscript>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
